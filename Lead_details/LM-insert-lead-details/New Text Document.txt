@@ -1,0 +1,105 @@
+import json
+
+import boto3
+from datetime import datetime, date
+from DB_manager import DatabaseManager
+import logging
+import pymysql
+from bson import json_util
+
+s3 = boto3.client('s3')
+
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+        return super().default(obj)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event, context):
+    data = json.loads(event['body'])
+    try:
+        conn = DatabaseManager.get_db_connection()
+        with conn.cursor() as cur:
+
+            args = (
+                data['First_Name'], data['Last_Name'], data['Mobile_No'],
+                data['Company_Name'], data['Company_Type_Id'], data['Salary'], data['Loan_Amount'],
+                data['Bank_Id'], data['Loan_Type_Id'], data['Loan_Process_Status_Id'],
+                data['Payslip_Image_Path'], data['Generated_Partner'], data['Generated_By'],
+                data['Lead_Status'], data['Generated_On'])
+
+
+            result_args = cur.callproc('SP_INSERT_LEAD_DETAILS', args)
+            print(cur.description)
+            row_headers = [x[0] for x in cur.description]
+            rv = cur.fetchall()
+            print(rv)
+            print(row_headers)
+            json_data = []
+            for result in rv:
+                json_data.append(dict(zip(row_headers, result)))
+            print(json_data)
+            if not rv:
+                return {
+                    "statusCode": 404,
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+                    },
+                    "body": json.dumps("Missing required fields or invalid data", default=json_util.default)
+                }
+            else:
+                json_data = []
+                for result in rv:
+                    json_data.append(dict(zip(row_headers, result)))
+                return {
+                    "statusCode": 200,
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+                    },
+                    "body": json.dumps(json_data, cls=CustomJSONEncoder)
+                }
+    except pymysql.Error as e:
+        print(e)
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+            },
+            "body": json.dumps("Error", cls=CustomJSONEncoder)
+        }
+if __name__  == "__main__":
+    events = { 
+    "body": json.dumps({
+    
+    'First_Name': 'John',
+    'Last_Name': 'Doe',
+    'Mobile_No': '9876543210',
+    'Company_Name': 'ABC Corp',
+    'Company_Type_Id' : '1',
+    'Salary': 50000,
+    'Loan_Amount': 100000,
+    'Bank_Id': 12345,
+    'Loan_Type_Id': 1,
+    'Loan_Process_Status_Id': 2,
+    'Payslip_Image_Path': '/path/to/image.png',
+    'Generated_Partner': 'Partner1',
+    'Generated_By': 'User123',
+    'Lead_Status': 'Active',
+    'Generated_On': '2023-01-01T12:00:00Z'
+    }) 
+
+} 
+   
+    lambda_handler (event=events,context="")

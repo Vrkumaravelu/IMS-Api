@@ -1,0 +1,200 @@
+---------------------------------------------------------------------------------------------
+import json
+from datetime import datetime, timedelta, date
+from DB_manager import DatabaseManager
+import logging
+import pymysql
+from decimal import Decimal
+from bson import json_util
+from botocore.exceptions import ClientError
+
+class CustomJSONEncoder(json.JSONEncoder):
+# class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return str(obj)
+        return super().default(obj)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+def lambda_handler(event, context):
+    
+    try:
+        conn = DatabaseManager.get_db_connection()
+        sql_select_lookup='''SELECT * FROM LMS.Lead_Details  join Leads_asset on Lead_Details.Lead_Details_Id = Leads_asset.Lead_detail_id'''
+        with conn.cursor() as cur:
+            cur.execute(sql_select_lookup)
+            row_headers=[x[0] for x in cur.description]
+            
+            rv = cur.fetchall()
+            json_data=[]
+            for result in rv:
+                json_data.append(dict(zip(row_headers,result)))
+                
+            return {
+                "statusCode": 200,
+                "headers": {
+                "Content-Type": "application/json",
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'OPTIONS,POST,GET,PUT,DELETE'
+                },
+                "body": json.dumps(json_data, cls=CustomJSONEncoder)
+            }
+    
+    except pymysql.Error as e:
+        print(e)
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+            },
+
+            "body": json.dumps("Database connection issue", cls=CustomJSONEncoder)  # Use the CustomJSONEncoder to handle datetime objects
+        }
+    finally:
+        if conn:
+            conn.close()
+------------------------------------------------------------------------------------------------------
+CREATE DEFINER=`admin`@`%` PROCEDURE `SP_GET_LEAD_DETAILS`(IN user_role_id INT, IN user_id INT)
+BEGIN
+    IF user_role_id = 1 THEN
+        SELECT 
+            LD.Lead_Details_Id,
+            LD.First_Name,
+            LD.Last_Name,
+            LD.Mobile_No,
+            LD.Company_Name,
+            LD.Company_Type_Id,
+            LD.Salary,
+            LD.Loan_Amount,
+            LD.Bank_Id,
+            B.Bank_Name,
+            LD.Loan_Type_Id,
+            LT.Loan_Type_Name,
+            LD.Loan_Process_Status_Id,
+            LPS.Loan_Process_Name,
+            LD.Pincode,
+            LD.Street,
+            LD.State,
+            LD.City,
+            LD.Door_no,
+            LD.Payslip_Image_Path,
+            LD.Generated_Partner,
+            LD.Lead_Status,
+            LD.Generated_On,
+            LD.Email,
+            (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(LA.asset_name,  LA.asset_path)
+                ) FROM LMS.Leads_asset LA WHERE LA.Lead_detail_id = LD.Lead_Details_Id
+            ) AS assets
+        FROM LMS.Lead_Details LD
+        LEFT JOIN LMS.Bank B ON B.Bank_Id = LD.Bank_Id
+        LEFT JOIN LMS.Loan_Type LT ON LT.Loan_Type_Id = LD.Lead_Status
+        LEFT JOIN LMS.Loan_Process_Status LPS ON LPS.Loan_Process_Status_Id = LD.Loan_Process_Status_Id
+        LEFT JOIN LMS.User u ON u.User_Id = LD.Generated_Partner;
+        -- WHERE IF(status_id = 0, LD.Lead_Status > 0, LD.Lead_Status = user_id);
+    ELSEIF user_role_id = 2 THEN
+        SELECT 
+            LD.Lead_Details_Id,
+            LD.First_Name,
+            LD.Last_Name,
+            LD.Mobile_No,
+            LD.Company_Name,
+            LD.Company_Type_Id,
+            LD.Salary,
+            LD.Loan_Amount,
+            LD.Bank_Id,
+            B.Bank_Name,
+            LD.Loan_Type_Id,
+            LT.Loan_Type_Name,
+            LD.Loan_Process_Status_Id,
+            LPS.Loan_Process_Name,
+            LD.Payslip_Image_Path,
+            LD.Generated_Partner,
+            LD.Lead_Status,
+            LD.Generated_On,
+            LD.Email,
+            LA.asset_name,
+            LA.asset_path,
+            LD.Pincode,
+            LD.Street,
+            LD.State,
+            LD.City,
+            LD.Door_no,
+            (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(LA.asset_name, LA.asset_path)
+                ) FROM LMS.Leads_asset LA WHERE LA.Lead_detail_id = LD.Lead_Details_Id
+            ) AS assets
+        FROM LMS.Lead_Details LD
+        LEFT JOIN LMS.Bank B ON B.Bank_Id = LD.Bank_Id
+        LEFT JOIN LMS.Loan_Type LT ON LT.Loan_Type_Id = LD.Lead_Status
+        LEFT JOIN LMS.Loan_Process_Status LPS ON LPS.Loan_Process_Status_Id = LD.Loan_Process_Status_Id
+        LEFT JOIN LMS.User u ON u.User_Id = LD.Generated_Partner
+		LEFT JOIN LMS.Leads_asset LA ON LA.Lead_detail_id = LD.Lead_Details_Id
+        -- WHERE LD.Generated_Partner = user_id AND (status_id > 0 OR LD.Lead_Status = user_id)
+        GROUP BY
+        LA.Lead_detail_id;
+    ELSE
+        SELECT 
+            LD.Lead_Details_Id,
+            LD.First_Name,
+            LD.Last_Name,
+            LD.Mobile_No,
+            LD.Company_Name,
+            LD.Company_Type_Id,
+            LD.Salary,
+            LD.Loan_Amount,
+            LD.Bank_Id,
+            B.Bank_Name,
+            LD.Loan_Type_Id,
+            LT.Loan_Type_Name,
+            LD.Loan_Process_Status_Id,
+            LPS.Loan_Process_Name,
+            LD.Payslip_Image_Path,
+            LD.Generated_Partner,
+            LD.Lead_Status,
+            LD.Generated_On,
+            LD.Email,
+            LA.asset_name,
+            LA.asset_path,
+            LD.Pincode,
+            LD.Street,
+            LD.State,
+            LD.City,
+            LD.Door_no,
+            (
+                SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(LA.asset_name,  LA.asset_path)
+                ) FROM LMS.Leads_asset LA WHERE LA.Lead_detail_id = LD.Lead_Details_Id
+            ) AS assets
+        FROM LMS.Lead_Details LD
+        LEFT JOIN LMS.Bank B ON B.Bank_Id = LD.Bank_Id
+        LEFT JOIN LMS.Loan_Type LT ON LT.Loan_Type_Id = LD.Lead_Status
+        LEFT JOIN LMS.Loan_Process_Status LPS ON LPS.Loan_Process_Status_Id = LD.Loan_Process_Status_Id
+        LEFT JOIN LMS.User u ON u.User_Id = LD.Generated_Partner
+        LEFT JOIN LMS.Leads_asset LA ON LA.Lead_detail_id = LD.Lead_Details_Id
+        LEFT JOIN LMS.Tellecaller TL ON TL.Partner_Id = LD.Generated_Partner AND TL.Tellecaller_Id = LD.Generated_By;
+        -- WHERE LD.Generated_By = user_id AND IF(status_id=0,LD.Lead_Status>0,LD.Lead_Status = user_id);
+
+    END IF;
+END
+
+-----------------------------------------------------------------------------------------
+ -- (
+        -- SELECT JSON_OBJECTAGG(
+					-- LA.asset_name, LA.asset_path
+                -- ) FROM LMS.Leads_asset LA WHERE LA.Lead_detail_id = LD.Lead_Details_Id
+           -- ) AS assets
+------------------------------------------------------------------------------------------
+JSON_OBJECT(LA.asset_name, CONCAT(LA.Leads_asset_id, '#', LA.asset_path))
+------------------------------------------------------------------------------------------
